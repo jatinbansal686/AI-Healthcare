@@ -432,7 +432,7 @@ async function createCalendarEvent(opts: {
 // ── Resend email ──────────────────────────────────────────────────────────────
 async function sendEmail(opts: { to: string; subject: string; html: string }) {
   const key = Deno.env.get("RESEND_API_KEY");
-  const from = Deno.env.get("FROM_EMAIL") ?? "noreply@healthscheduler.app";
+  const from = "onboarding@resend.dev" //Deno.env.get("FROM_EMAIL") ?? "noreply@healthscheduler.app";
 
   if (!key) {
     console.warn("RESEND_API_KEY not set — skipping email to", opts.to);
@@ -447,7 +447,7 @@ async function sendEmail(opts: { to: string; subject: string; html: string }) {
     },
     body: JSON.stringify({
       from: `HealthScheduler <${from}>`,
-      to: [opts.to],
+      to: ["jatinbansal686@gmail.com"],
       subject: opts.subject,
       html: opts.html,
     }),

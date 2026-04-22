@@ -34,8 +34,10 @@ export default function AdminPage() {
     therapists,
     isLoadingInquiries,
     isLoadingTherapists,
-    upsertTherapist,
+    //upsertTherapist,
     deleteTherapist,
+    updateTherapist,
+    createTherapist,
   } = useAdminData();
   const [editingTherapist, setEditingTherapist] = useState<
     Therapist | undefined
@@ -51,8 +53,19 @@ export default function AdminPage() {
     setShowForm(false);
   };
 
-  const handleUpsert = (data: Partial<Therapist>) => {
-    upsertTherapist.mutate(data, { onSuccess: closeForm });
+  const handleUpsert = (
+    data: Partial<Therapist> & { email?: string; password?: string },
+  ) => {
+    if (editingTherapist) {
+      // Editing existing — use direct DB update
+      updateTherapist.mutate(
+        { ...data, id: editingTherapist.id },
+        { onSuccess: closeForm },
+      );
+    } else {
+      // Creating new — use Edge Function which creates Auth user + therapist record
+      createTherapist.mutate(data as any, { onSuccess: closeForm });
+    }
   };
 
   return (
@@ -202,7 +215,11 @@ export default function AdminPage() {
               therapist={editingTherapist}
               onSubmit={handleUpsert}
               onCancel={closeForm}
-              loading={upsertTherapist.isPending}
+              loading={
+                editingTherapist
+                  ? updateTherapist.isPending
+                  : createTherapist.isPending
+              }
             />
           </DialogContent>
         </Dialog>

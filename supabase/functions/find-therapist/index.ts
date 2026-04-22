@@ -1,6 +1,55 @@
 // @ts-nocheck
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.0";
 
+// Add this helper at the top of find-therapist/index.ts
+function normalizeInsurance(raw: string | null): string | null {
+  if (!raw) return null
+  const val = raw.toLowerCase().trim()
+  const map: Record<string, string> = {
+    'blue cross':        'bcbs',
+    'blue shield':       'bcbs',
+    'bluecross':         'bcbs',
+    'blue cross blue shield': 'bcbs',
+    'self pay':          'self_pay',
+    'self-pay':          'self_pay',
+    'out of pocket':     'self_pay',
+    'united health':     'united',
+    'unitedhealthcare':  'united',
+    'united healthcare': 'united',
+  }
+  return map[val] ?? val
+}
+
+function normalizeSpecialty(raw: string | null): string | null {
+  if (!raw) return null
+  const val = raw.toLowerCase().trim().replace(/\s+/g, '_')
+  const map: Record<string, string> = {
+    'panic attacks':   'anxiety',
+    'panic':           'anxiety',
+    'sad':             'depression',
+    'sadness':         'depression',
+    'ptsd':            'trauma',
+    'post traumatic':  'trauma',
+    'obsessive':       'ocd',
+    'compulsive':      'ocd',
+    'loss':            'grief',
+    'bereavement':     'grief',
+    'anger':           'anger_management',
+    'addiction':       'substance_abuse',
+    'drugs':           'substance_abuse',
+    'alcohol':         'substance_abuse',
+    'couples':         'relationships',
+    'marriage':        'relationships',
+    'family':          'family_therapy',
+    'kids':            'adolescents',
+    'teen':            'adolescents',
+    'teenager':        'adolescents',
+    'men':             'mens_health',
+    "men's":           'mens_health',
+  }
+  return map[val] ?? val
+}
+
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers":
@@ -70,36 +119,17 @@ Deno.serve(async (req: Request) => {
     );
 
     // Progressive relaxation — try strictest first, relax one filter at a time
-    const attempts = [
-      // Attempt 1: all filters
-      {
-        specialty: inquiry.extracted_specialty,
-        insurance: inquiry.insurance_info,
-        language: inquiry.preferred_language,
-        gender: inquiry.preferred_gender,
-      },
-      // Attempt 2: drop gender
-      {
-        specialty: inquiry.extracted_specialty,
-        insurance: inquiry.insurance_info,
-        language: inquiry.preferred_language,
-        gender: null,
-      },
-      // Attempt 3: drop language + gender
-      {
-        specialty: inquiry.extracted_specialty,
-        insurance: inquiry.insurance_info,
-        language: null,
-        gender: null,
-      },
-      // Attempt 4: drop insurance
-      {
-        specialty: inquiry.extracted_specialty,
-        insurance: null,
-        language: null,
-        gender: null,
-      },
-    ];
+    // In the main handler, replace the attempts array:
+const normalizedSpecialty = normalizeSpecialty(inquiry.extracted_specialty)
+const normalizedInsurance  = normalizeInsurance(inquiry.insurance_info)
+
+const attempts = [
+  { specialty: normalizedSpecialty, insurance: normalizedInsurance, language: inquiry.preferred_language, gender: inquiry.preferred_gender },
+  { specialty: normalizedSpecialty, insurance: normalizedInsurance, language: inquiry.preferred_language, gender: null },
+  { specialty: normalizedSpecialty, insurance: normalizedInsurance, language: null, gender: null },
+  { specialty: normalizedSpecialty, insurance: null,                language: null, gender: null },
+  { specialty: null,                insurance: null,                language: null, gender: null },
+]
 
     let matches: any[] = [];
 

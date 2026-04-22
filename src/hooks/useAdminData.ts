@@ -50,21 +50,55 @@ export function useAdminData() {
     enabled: !!session,
   })
 
-  const upsertTherapist = useMutation({
-    mutationFn: async (payload: Partial<Therapist>) => {
-      const { error } = payload.id
-        ? await supabase.from('therapists').update(payload).eq('id', payload.id)
-        : await supabase.from('therapists').insert(payload)
-      if (error) throw error
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['admin', 'therapists'] })
-      toast({ title: 'Therapist saved successfully.' })
-    },
-    onError: (err: any) => {
-      toast({ title: 'Error', description: err.message, variant: 'destructive' })
-    },
-  })
+  // Replace the upsertTherapist mutation with these two:
+
+const createTherapist = useMutation({
+  mutationFn: async (payload: {
+    email: string
+    password: string
+    name: string
+    bio?: string
+    photo_url?: string
+    gender: string
+    specialties: string[]
+    accepted_insurance: string[]
+    languages: string[]
+    google_calendar_id?: string
+  }) => {
+    const { data: { session } } = await supabase.auth.getSession()
+    const { data, error } = await supabase.functions.invoke('create-therapist', {
+      body: payload,
+      headers: { Authorization: `Bearer ${session?.access_token}` },
+    })
+    if (error) throw error
+    if (data?.error) throw new Error(data.error)
+    return data
+  },
+  onSuccess: () => {
+    queryClient.invalidateQueries({ queryKey: ['admin', 'therapists'] })
+    toast({ title: 'Therapist account created successfully.' })
+  },
+  onError: (err: any) => {
+    toast({ title: 'Error', description: err.message, variant: 'destructive' })
+  },
+})
+
+const updateTherapist = useMutation({
+  mutationFn: async (payload: Partial<Therapist> & { id: string }) => {
+    const { error } = await supabase
+      .from('therapists')
+      .update(payload)
+      .eq('id', payload.id)
+    if (error) throw error
+  },
+  onSuccess: () => {
+    queryClient.invalidateQueries({ queryKey: ['admin', 'therapists'] })
+    toast({ title: 'Therapist updated.' })
+  },
+  onError: (err: any) => {
+    toast({ title: 'Error', description: err.message, variant: 'destructive' })
+  },
+})
 
   const deleteTherapist = useMutation({
     mutationFn: async (id: string) => {
@@ -84,7 +118,8 @@ export function useAdminData() {
     isLoadingInquiries: inquiriesQuery.isLoading,
     isLoadingAppointments: appointmentsQuery.isLoading,
     isLoadingTherapists: therapistsQuery.isLoading,
-    upsertTherapist,
+    updateTherapist,
     deleteTherapist,
+    createTherapist
   }
 }
