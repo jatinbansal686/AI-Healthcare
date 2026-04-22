@@ -1,158 +1,245 @@
 // @ts-nocheck
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.0'
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.0";
 
-const corsHeaders = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+// Add this helper at the top of find-therapist/index.ts
+function normalizeInsurance(raw: string | null): string | null {
+  if (!raw) return null;
+  const val = raw.toLowerCase().trim();
+  const map: Record<string, string> = {
+    "blue cross": "bcbs",
+    "blue shield": "bcbs",
+    bluecross: "bcbs",
+    "blue cross blue shield": "bcbs",
+    "self pay": "self_pay",
+    "self-pay": "self_pay",
+    "out of pocket": "self_pay",
+    "united health": "united",
+    unitedhealthcare: "united",
+    "united healthcare": "united",
+  };
+  return map[val] ?? val;
 }
 
+function normalizeSpecialty(raw: string | null): string | null {
+  if (!raw) return null;
+  const val = raw.toLowerCase().trim().replace(/\s+/g, "_");
+  const map: Record<string, string> = {
+    "panic attacks": "anxiety",
+    panic: "anxiety",
+    sad: "depression",
+    sadness: "depression",
+    ptsd: "trauma",
+    "post traumatic": "trauma",
+    obsessive: "ocd",
+    compulsive: "ocd",
+    loss: "grief",
+    bereavement: "grief",
+    anger: "anger_management",
+    addiction: "substance_abuse",
+    drugs: "substance_abuse",
+    alcohol: "substance_abuse",
+    couples: "relationships",
+    marriage: "relationships",
+    family: "family_therapy",
+    kids: "adolescents",
+    teen: "adolescents",
+    teenager: "adolescents",
+    men: "mens_health",
+    "men's": "mens_health",
+  };
+  return map[val] ?? val;
+}
+
+const corsHeaders = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers":
+    "authorization, x-client-info, apikey, content-type",
+};
+
 Deno.serve(async (req: Request) => {
-  if (req.method === 'OPTIONS') {
-    return new Response('ok', { headers: corsHeaders })
+  if (req.method === "OPTIONS") {
+    return new Response("ok", { headers: corsHeaders });
   }
 
   try {
-    const authHeader = req.headers.get('Authorization')
+    const authHeader = req.headers.get("Authorization");
     if (!authHeader) {
-      return new Response(JSON.stringify({ error: 'Unauthorized' }), {
-        status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      })
+      return new Response(JSON.stringify({ error: "Unauthorized" }), {
+        status: 401,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
     }
 
-    // Use service role for admin operations
     const supabase = createClient(
-      Deno.env.get('SUPABASE_URL')!,
-      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
-    )
-
-    // Verify caller is admin
-    const { data: { user: caller }, error: authErr } = await supabase.auth.getUser(
-      authHeader.replace('Bearer ', '')
-    )
-    if (authErr || !caller) {
-      return new Response(JSON.stringify({ error: 'Unauthorized' }), {
-        status: 401, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      })
-    }
-
-    const { data: callerProfile } = await supabase
-      .from('user_profiles')
-      .select('role')
-      .eq('id', caller.id)
-      .single()
-
-    if (callerProfile?.role !== 'admin') {
-      return new Response(JSON.stringify({ error: 'Forbidden — admin only' }), {
-        status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      })
-    }
+      Deno.env.get("SUPABASE_URL")!,
+      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
+    );
 
     const {
-      email,
-      password,
-      name,
-      bio,
-      photo_url,
-      gender,
-      specialties,
-      accepted_insurance,
-      languages,
-      google_calendar_id,
-    } = await req.json()
-
-    if (!email || !password || !name) {
-      return new Response(
-        JSON.stringify({ error: 'email, password, and name are required' }),
-        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      )
+      data: { user },
+      error: authError,
+    } = await supabase.auth.getUser(authHeader.replace("Bearer ", ""));
+    if (authError || !user) {
+      return new Response(JSON.stringify({ error: "Unauthorized" }), {
+        status: 401,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
     }
 
-    if (password.length < 8) {
-      return new Response(
-        JSON.stringify({ error: 'Password must be at least 8 characters' }),
-        { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      )
+    const { inquiryId } = await req.json();
+    if (!inquiryId) {
+      return new Response(JSON.stringify({ error: "inquiryId is required" }), {
+        status: 400,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
     }
 
-    // Step 1: Create Supabase Auth user
-    const { data: newUser, error: createErr } = await supabase.auth.admin.createUser({
-      email,
-      password,
-      email_confirm: true, // auto-confirm so therapist can login immediately
-      user_metadata: { full_name: name },
-    })
+    const { data: inquiry, error: iErr } = await supabase
+      .from("inquiries")
+      .select("*")
+      .eq("id", inquiryId)
+      .eq("patient_id", user.id)
+      .single();
 
-    if (createErr || !newUser.user) {
-      console.error('Auth user creation error:', createErr)
-      return new Response(
-        JSON.stringify({ error: createErr?.message ?? 'Failed to create user account' }),
-        { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      )
+    if (iErr || !inquiry) {
+      return new Response(JSON.stringify({ error: "Inquiry not found" }), {
+        status: 404,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
     }
 
-    const newUserId = newUser.user.id
-
-    // Step 2: Set role to therapist in user_profiles
-    // (trigger already created the profile row on signup)
-    const { error: profileErr } = await supabase
-      .from('user_profiles')
-      .update({ role: 'therapist', full_name: name, email })
-      .eq('id', newUserId)
-
-    if (profileErr) {
-      console.error('Profile update error:', profileErr)
-      // Don't block — profile may not exist yet if trigger is slow
-      await supabase.from('user_profiles').upsert({
-        id:         newUserId,
-        role:       'therapist',
-        full_name:  name,
-        email,
-      })
-    }
-
-    // Step 3: Create therapist record linked to this user
-    const { data: therapist, error: therapistErr } = await supabase
-      .from('therapists')
-      .insert({
-        user_id:           newUserId,
-        name,
-        bio:               bio ?? null,
-        photo_url:         photo_url ?? null,
-        gender:            gender ?? 'prefer_not_to_say',
-        specialties:       (specialties ?? []).map((s: string) => s.toLowerCase()),
-        accepted_insurance: (accepted_insurance ?? []).map((i: string) => i.toLowerCase()),
-        languages:         languages ?? ['English'],
-        google_calendar_id: google_calendar_id ?? null,
-        is_active:         true,
-      })
-      .select()
-      .single()
-
-    if (therapistErr || !therapist) {
-      console.error('Therapist insert error:', therapistErr)
-      // Rollback: delete the auth user we just created
-      await supabase.auth.admin.deleteUser(newUserId)
-      return new Response(
-        JSON.stringify({ error: 'Failed to create therapist profile', detail: therapistErr?.message }),
-        { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      )
-    }
-
-    console.log(`Therapist created: ${name} (${email}) — user_id: ${newUserId}`)
-
-    return new Response(
+    console.log(
+      "Matching inquiry:",
       JSON.stringify({
-        therapist,
-        message: `Therapist account created. They can login with email: ${email}`,
+        specialty: inquiry.extracted_specialty,
+        insurance: inquiry.insurance_info,
+        language: inquiry.preferred_language,
+        gender: inquiry.preferred_gender,
       }),
-      { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-    )
+    );
 
+    // Progressive relaxation — try strictest first, relax one filter at a time
+    // In the main handler, replace the attempts array:
+    const normalizedSpecialty = normalizeSpecialty(inquiry.extracted_specialty);
+    const normalizedInsurance = normalizeInsurance(inquiry.insurance_info);
+
+    const attempts = [
+      {
+        specialty: normalizedSpecialty,
+        insurance: normalizedInsurance,
+        language: inquiry.preferred_language,
+        gender: inquiry.preferred_gender,
+      },
+      {
+        specialty: normalizedSpecialty,
+        insurance: normalizedInsurance,
+        language: inquiry.preferred_language,
+        gender: null,
+      },
+      {
+        specialty: normalizedSpecialty,
+        insurance: normalizedInsurance,
+        language: null,
+        gender: null,
+      },
+      {
+        specialty: normalizedSpecialty,
+        insurance: null,
+        language: null,
+        gender: null,
+      },
+      { specialty: null, insurance: null, language: null, gender: null },
+    ];
+
+    let matches: any[] = [];
+
+    for (const attempt of attempts) {
+      matches = await queryTherapists(supabase, attempt);
+      if (matches.length > 0) {
+        console.log(`Match found with filters:`, JSON.stringify(attempt));
+        break;
+      }
+    }
+
+    // Last resort — any active therapist
+    if (matches.length === 0) {
+      console.log("Fallback: returning any active therapists");
+      const { data } = await supabase
+        .from("therapists")
+        .select("*")
+        .eq("is_active", true)
+        .limit(5);
+      matches = data ?? [];
+    }
+
+    // Update inquiry with best match
+    if (matches.length > 0) {
+      await supabase
+        .from("inquiries")
+        .update({ matched_therapist_id: matches[0].id, status: "matched" })
+        .eq("id", inquiryId);
+    } else {
+      await supabase
+        .from("inquiries")
+        .update({ status: "failed" })
+        .eq("id", inquiryId);
+    }
+
+    console.log(`Returning ${matches.length} matches`);
+
+    return new Response(JSON.stringify({ matches, total: matches.length }), {
+      status: 200,
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
   } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err)
-    console.error('create-therapist error:', msg)
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error("find-therapist error:", msg);
     return new Response(JSON.stringify({ error: msg }), {
-      status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-    })
+      status: 500,
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
   }
-})
+});
+
+async function queryTherapists(
+  supabase: any,
+  filters: {
+    specialty: string | null;
+    insurance: string | null;
+    language: string | null;
+    gender: string | null;
+  },
+): Promise<any[]> {
+  let q = supabase.from("therapists").select("*").eq("is_active", true);
+
+  if (filters.specialty?.trim()) {
+    q = q.contains("specialties", [filters.specialty.trim().toLowerCase()]);
+  }
+  if (
+    filters.insurance?.trim() &&
+    filters.insurance.toLowerCase() !== "unknown"
+  ) {
+    q = q.contains("accepted_insurance", [
+      filters.insurance.trim().toLowerCase(),
+    ]);
+  }
+  if (
+    filters.language?.trim() &&
+    !["any", "unknown"].includes(filters.language.toLowerCase())
+  ) {
+    q = q.contains("languages", [filters.language.trim()]);
+  }
+  if (
+    filters.gender?.trim() &&
+    !["any", "unknown", "no preference"].includes(filters.gender.toLowerCase())
+  ) {
+    q = q.eq("gender", filters.gender.trim().toLowerCase());
+  }
+
+  const { data, error } = await q.limit(5);
+  if (error) {
+    console.error("queryTherapists DB error:", JSON.stringify(error));
+    return [];
+  }
+  return data ?? [];
+}

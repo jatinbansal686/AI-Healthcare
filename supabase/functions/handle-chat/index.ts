@@ -79,21 +79,24 @@ Deno.serve(async (req: Request) => {
     // Load full chat history from DB — DB is single source of truth
     // NEW — only loads messages from the current chat session
 
+    // Load only current session's history
+    const historyQuery = supabase
+      .from("chat_messages")
+      .select("role, content, created_at")
+      .eq("patient_id", user.id)
+      .order("created_at", { ascending: true })
+      .limit(40);
 
-// Load only current session's history
-const historyQuery = supabase
-  .from('chat_messages')
-  .select('role, content, created_at')
-  .eq('patient_id', user.id)
-  .order('created_at', { ascending: true })
-  .limit(40)
-
-// If we have an inquiryId, scope to that inquiry's messages
-// Otherwise scope by chatSessionId stored in metadata
-const { data: dbMessages } = inquiryId
-  ? await historyQuery.eq('inquiry_id', inquiryId)
-  : await historyQuery.is('inquiry_id', null)
-    .gte('created_at', new Date(Date.now() - 4 * 60 * 60 * 1000).toISOString()) // last 4 hours only
+    // If we have an inquiryId, scope to that inquiry's messages
+    // Otherwise scope by chatSessionId stored in metadata
+    const { data: dbMessages } = inquiryId
+      ? await historyQuery.eq("inquiry_id", inquiryId)
+      : await historyQuery
+          .is("inquiry_id", null)
+          .gte(
+            "created_at",
+            new Date(Date.now() - 4 * 60 * 60 * 1000).toISOString(),
+          ); // last 4 hours only
 
     const history = dbMessages ?? [];
 

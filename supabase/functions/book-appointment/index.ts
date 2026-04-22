@@ -276,6 +276,7 @@ async function handleTherapistResponse(
     minute: "2-digit",
   });
 
+  // ❌ REJECT FLOW
   if (action === "reject") {
     await supabase
       .from("appointments")
@@ -303,13 +304,14 @@ async function handleTherapistResponse(
     return new Response(
       successPage(
         "Appointment Declined",
-        `You have declined the request from ${patientName}. They have been notified.`,
+        `You have declined the request from ${patientName}.`,
       ),
       { status: 200, headers: htmlHeader },
     );
   }
 
-  // Accept — try Google Calendar (non-fatal if fails)
+  // ✅ ACCEPT FLOW
+
   let calendarEventId: string | null = null;
 
   if (
@@ -326,14 +328,16 @@ async function handleTherapistResponse(
         patientEmail: patientEmail ?? "unknown@email.com",
         therapistName,
       });
+
       console.log("Calendar event created:", calendarEventId);
-    } catch (calErr) {
-      console.error("Calendar error (non-fatal):", calErr);
+    } catch (err) {
+      console.error("Calendar error:", err);
     }
   } else {
-    console.warn("Therapist has no Google Calendar connected — skipping");
+    console.warn("No Google Calendar connected");
   }
 
+  // ✅ FIX: UPDATE APPOINTMENT (THIS WAS COMMENTED BEFORE)
   await supabase
     .from("appointments")
     .update({
@@ -342,11 +346,13 @@ async function handleTherapistResponse(
     })
     .eq("id", appointment.id);
 
+  // ✅ UPDATE INQUIRY
   await supabase
     .from("inquiries")
     .update({ status: "scheduled" })
     .eq("id", appointment.inquiry_id);
 
+  // ✅ EMAIL PATIENT
   if (patientEmail) {
     await sendEmail({
       to: patientEmail,
@@ -364,13 +370,69 @@ async function handleTherapistResponse(
   return new Response(
     successPage(
       "Appointment Confirmed! ✅",
-      `You accepted the appointment with ${patientName}. A calendar invite has been created.`,
+      `You accepted the appointment with ${patientName}.`,
     ),
     { status: 200, headers: htmlHeader },
   );
 }
-
 // ── Google Calendar ───────────────────────────────────────────────────────────
+// async function createCalendarEvent(opts: {
+//   refreshToken: string;
+//   calendarId: string;
+//   startTime: string;
+//   endTime: string;
+//   patientName: string;
+//   patientEmail: string;
+//   therapistName: string;
+// }): Promise<string> {
+//   const tokenRes = await fetch("https://oauth2.googleapis.com/token", {
+//     method: "POST",
+//     headers: { "Content-Type": "application/x-www-form-urlencoded" },
+//     body: new URLSearchParams({
+//       client_id: Deno.env.get("GOOGLE_CLIENT_ID")!,
+//       client_secret: Deno.env.get("GOOGLE_CLIENT_SECRET")!,
+//       refresh_token: opts.refreshToken,
+//       grant_type: "refresh_token",
+//     }),
+//   });
+//   const tokenData = await tokenRes.json();
+//   if (!tokenData.access_token) {
+//     throw new Error(`Token refresh failed: ${JSON.stringify(tokenData)}`);
+//   }
+
+//   const eventRes = await fetch(
+//     `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(opts.calendarId)}/events`,
+//     {
+//       method: "POST",
+//       headers: {
+//         Authorization: `Bearer ${tokenData.access_token}`,
+//         "Content-Type": "application/json",
+//       },
+//       body: JSON.stringify({
+//         summary: `Therapy Session — ${opts.patientName}`,
+//         description: "Scheduled via HealthScheduler",
+//         start: { dateTime: opts.startTime, timeZone: "America/Chicago" },
+//         end: { dateTime: opts.endTime, timeZone: "America/Chicago" },
+//         attendees: [
+//           { email: opts.patientEmail, displayName: opts.patientName },
+//         ],
+//         sendUpdates: "all",
+//         reminders: {
+//           useDefault: false,
+//           overrides: [
+//             { method: "email", minutes: 1440 },
+//             { method: "popup", minutes: 30 },
+//           ],
+//         },
+//       }),
+//     },
+//   );
+//   const eventData = await eventRes.json();
+//   if (!eventData.id) {
+//     throw new Error(`Calendar event failed: ${JSON.stringify(eventData)}`);
+//   }
+//   return eventData.id;
+// }
 async function createCalendarEvent(opts: {
   refreshToken: string;
   calendarId: string;
@@ -380,6 +442,8 @@ async function createCalendarEvent(opts: {
   patientEmail: string;
   therapistName: string;
 }): Promise<string> {
+  console.log("STEP 1: Refreshing token...");
+
   const tokenRes = await fetch("https://oauth2.googleapis.com/token", {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
@@ -390,10 +454,15 @@ async function createCalendarEvent(opts: {
       grant_type: "refresh_token",
     }),
   });
+
   const tokenData = await tokenRes.json();
+  console.log("TOKEN RESPONSE:", tokenData);
+
   if (!tokenData.access_token) {
-    throw new Error(`Token refresh failed: ${JSON.stringify(tokenData)}`);
+    throw new Error("❌ Failed to get access token");
   }
+
+  console.log("STEP 2: Creating calendar event...");
 
   const eventRes = await fetch(
     `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(opts.calendarId)}/events`,
@@ -406,33 +475,33 @@ async function createCalendarEvent(opts: {
       body: JSON.stringify({
         summary: `Therapy Session — ${opts.patientName}`,
         description: "Scheduled via HealthScheduler",
-        start: { dateTime: opts.startTime, timeZone: "America/Chicago" },
-        end: { dateTime: opts.endTime, timeZone: "America/Chicago" },
+        start: { dateTime: opts.startTime, timeZone: "Asia/Kolkata" },
+        end: { dateTime: opts.endTime, timeZone: "Asia/Kolkata" },
         attendees: [
           { email: opts.patientEmail, displayName: opts.patientName },
         ],
-        sendUpdates: "all",
-        reminders: {
-          useDefault: false,
-          overrides: [
-            { method: "email", minutes: 1440 },
-            { method: "popup", minutes: 30 },
-          ],
-        },
       }),
     },
   );
+
   const eventData = await eventRes.json();
-  if (!eventData.id) {
-    throw new Error(`Calendar event failed: ${JSON.stringify(eventData)}`);
+  console.log("EVENT RESPONSE:", eventData);
+
+  if (!eventRes.ok) {
+    throw new Error(`❌ Google API Error: ${JSON.stringify(eventData)}`);
   }
+
+  if (!eventData.id) {
+    throw new Error(`❌ No event ID returned`);
+  }
+
   return eventData.id;
 }
 
 // ── Resend email ──────────────────────────────────────────────────────────────
 async function sendEmail(opts: { to: string; subject: string; html: string }) {
   const key = Deno.env.get("RESEND_API_KEY");
-  const from = "onboarding@resend.dev" //Deno.env.get("FROM_EMAIL") ?? "noreply@healthscheduler.app";
+  const from = "onboarding@resend.dev"; //Deno.env.get("FROM_EMAIL") ?? "noreply@healthscheduler.app";
 
   if (!key) {
     console.warn("RESEND_API_KEY not set — skipping email to", opts.to);
