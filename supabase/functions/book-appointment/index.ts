@@ -222,7 +222,10 @@ async function handleTherapistResponse(
   action: "accept" | "reject",
 ): Promise<Response> {
   const token = url.searchParams.get("token");
-  const htmlHeader = { "Content-Type": "text/html; charset=utf-8" };
+  const htmlHeader = {
+    "Content-Type": "text/html; charset=utf-8",
+    "Access-Control-Allow-Origin": "*",
+  };
 
   if (!token) {
     return new Response(errorPage("Invalid link — token is missing."), {
@@ -250,15 +253,28 @@ async function handleTherapistResponse(
     });
   }
 
-  if (appointment.confirmation_status !== "pending") {
+  // Allow re-processing only for calendar creation if already accepted
+  // Block only if already rejected (can't un-reject)
+  if (appointment.confirmation_status === "rejected") {
+    return new Response(
+      successPage("Already Declined", "This appointment was already declined."),
+      { status: 200, headers: htmlHeader },
+    );
+  }
+  // If already accepted, still try to create calendar event if missing
+  if (
+    appointment.confirmation_status === "accepted" &&
+    appointment.google_calendar_event_id
+  ) {
     return new Response(
       successPage(
-        `Already ${appointment.confirmation_status}`,
-        `This appointment has already been ${appointment.confirmation_status}.`,
+        "Already Confirmed",
+        "This appointment is already confirmed.",
       ),
       { status: 200, headers: htmlHeader },
     );
   }
+  // Otherwise proceed — either pending or accepted without calendar yet
 
   const patientEmail = appointment.patient?.email ?? null;
   const patientName = appointment.patient?.full_name ?? "the patient";

@@ -24,21 +24,51 @@ export default function TherapistDashboard() {
     if (!session) return;
     setLoading(true);
     try {
+      // Fetch therapist profile
       const { data: t } = await supabase
         .from("therapists")
         .select("*")
         .eq("user_id", session.user.id)
         .single();
       setTherapist(t);
+
       if (t) {
-        const { data: apts } = await supabase
+        // Fetch appointments without joins
+        const { data: rawApts } = await supabase
           .from("appointments")
-          .select("*, patient:user_profiles(full_name, email)")
+          .select("*")
           .eq("therapist_id", t.id)
           .order("start_time", { ascending: false })
           .limit(50);
 
-        setAppointments(apts || []);
+        if (rawApts?.length) {
+          // Collect unique patient IDs
+          const patientIds = [
+            ...new Set(rawApts.map((a) => a.patient_id).filter(Boolean)),
+          ];
+
+          // Fetch patient profiles separately
+          const { data: patients } = patientIds.length
+            ? await supabase
+                .from("user_profiles")
+                .select("id, full_name, email")
+                .in("id", patientIds)
+            : { data: [] };
+
+          const patientMap = Object.fromEntries(
+            (patients ?? []).map((p) => [p.id, p]),
+          );
+
+          // Enrich appointments with patient data
+          const enriched = rawApts.map((apt) => ({
+            ...apt,
+            patient: patientMap[apt.patient_id] ?? null,
+          }));
+
+          setAppointments(enriched);
+        } else {
+          setAppointments([]);
+        }
       }
     } finally {
       setLoading(false);
